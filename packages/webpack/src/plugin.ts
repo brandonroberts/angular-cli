@@ -39,6 +39,10 @@ export class ModuleRoute {
   }
 }
 
+export interface LazyModule {
+  resolved: string;
+  loadChildren: string;
+}
 
 export class AotPlugin {
   private _entryModule: ModuleRoute;
@@ -232,12 +236,18 @@ export class AotPlugin {
         // Process the lazy routes
         this._lazyRoutes =
           this._processNgModule(this._entryModule, null)
-            .map(module => ModuleRoute.fromString(module))
-            .reduce((lazyRoutes: any, module: ModuleRoute) => {
-              lazyRoutes[`${module.path}.ngfactory`] = path.join(
-                this.genDir, module.path + '.ngfactory.ts');
-          return lazyRoutes;
-        }, {});
+            .map(({ resolved, loadChildren }: LazyModule) => {
+              return {
+                resolved: ModuleRoute.fromString(resolved),
+                loadChildren
+              };
+            })
+            .reduce((lazyRoutes: any,
+              { resolved, loadChildren }: { resolved: ModuleRoute, loadChildren: string }) => {
+                  lazyRoutes[`${loadChildren}.ngfactory`] = path.join(
+                    this.genDir, resolved.path + '.ngfactory.ts');
+              return lazyRoutes;
+            }, {});
       })
       .then(() => cb(), (err) => cb(err));
   }
@@ -249,7 +259,7 @@ export class AotPlugin {
     return module.path;
   }
 
-  private _processNgModule(module: ModuleRoute, containingFile: string | null): string[] {
+  private _processNgModule(module: ModuleRoute, containingFile: string | null): LazyModule[] {
     const modulePath = containingFile ? module.path : ('./' + path.basename(module.path));
     if (containingFile === null) {
       containingFile = module.path + '.ts';
@@ -261,7 +271,12 @@ export class AotPlugin {
     const entryNgModuleMetadata = this.getNgModuleMetadata(staticSymbol);
     const loadChildren = this.extractLoadChildren(entryNgModuleMetadata);
     const result = loadChildren.map(route => {
-      return this._resolveModule(new ModuleRoute(route), resolvedModulePath);
+      const moduleRoute = ModuleRoute.fromString(route);
+
+      return {
+        resolved: this._resolveModule(moduleRoute, resolvedModulePath),
+        loadChildren: moduleRoute.path
+      };
     });
 
     // Also concatenate every child of child modules.
